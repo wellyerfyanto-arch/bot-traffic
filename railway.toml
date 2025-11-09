@@ -1,5 +1,6 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 startCommand = "node server.js"
@@ -10,3 +11,5 @@ NODE_ENV = "production"
 [deploy.environment]
 NODE_ENV = "production"
 PORT = "3000"
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium-browser"
