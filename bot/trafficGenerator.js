@@ -53,6 +53,35 @@ class TrafficGenerator {
     getSessionLogs(sessionId) {
         return this.sessionLogs.get(sessionId) || [];
     }
+// bot/trafficGenerator.js - Perlu implementasi lengkap
+async executeSessionSteps(sessionId, config) {
+    try {
+        // STEP 1: Browser setup dengan proxy
+        this.log(sessionId, 'STEP_1', 'Mempersiapkan browser dengan proxy...');
+        const browser = await this.launchBrowserWithProxy(config);
+        
+        // STEP 2: Setup Google profile
+        this.log(sessionId, 'STEP_2', 'Menyiapkan Google profile...');
+        await this.setupGoogleProfile(browser, config);
+        
+        // STEP 3: Buka target URL
+        this.log(sessionId, 'STEP_3', `Membuka URL: ${config.targetUrl}`);
+        const page = await this.navigateToUrl(browser, config.targetUrl);
+        
+        // STEP 4: Human-like behavior
+        this.log(sessionId, 'STEP_4', 'Simulasi perilaku manusia...');
+        await this.humanBehaviorSimulation(page);
+        
+        // STEP 5: Handle ads
+        this.log(sessionId, 'STEP_5', 'Melewati iklan...');
+        await this.skipGoogleAds(page);
+        
+        // STEP 6: Clear cache & session
+        this.log(sessionId, 'STEP_6', 'Membersihkan cache...');
+        await this.clearCache(browser);
+        
+    } catch (error) {
+        this.log(sessionId, 'ERROR', error.message);
+    }
 }
-
 module.exports = new TrafficGenerator();
