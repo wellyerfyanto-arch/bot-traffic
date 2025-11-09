@@ -96,6 +96,14 @@ async function loadSystemStatus() {
         `;
     }
 }
+// Di public/script.js - update form data
+const formData = {
+    targetUrl: document.getElementById('targetUrl').value,
+    profiles: document.getElementById('profiles').value,
+    deviceType: document.getElementById('deviceType').value,
+    proxies: document.getElementById('proxies').value,
+    useFreeProxy: document.getElementById('useFreeProxy').checked // ← Tambah ini
+};
 
 function goToMonitoring() {
     window.location.href = '/monitoring';
