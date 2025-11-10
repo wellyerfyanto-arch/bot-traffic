@@ -17,7 +17,7 @@ class TrafficGenerator {
         let browser;
         try {
             browser = await puppeteer.launch({
-                headless: "new",
+                headless: "new",  // ✅ DIUBAH
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -49,7 +49,6 @@ class TrafficGenerator {
     async startNewSession(config) {
         const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
-        // Tambahkan proxy manual ke handler jika ada
         if (config.proxyList && config.proxyList.length > 0) {
             this.proxyHandler.addMultipleProxies(config.proxyList);
         }
@@ -65,7 +64,6 @@ class TrafficGenerator {
 
         this.log(sessionId, 'SESSION_STARTED', `Session started dengan ${config.profileCount} profiles`);
         
-        // Execute session in background
         this.executeSession(sessionId, config).catch(error => {
             this.log(sessionId, 'SESSION_ERROR', `Session failed: ${error.message}`);
             this.stopSession(sessionId);
@@ -77,12 +75,10 @@ class TrafficGenerator {
     async executeSession(sessionId, config) {
         let browser;
         try {
-            // STEP 1: Launch Browser dengan Proxy
             this.log(sessionId, 'STEP_1', 'Launching browser dengan proxy...');
             browser = await this.launchBrowser(config);
             const page = await browser.newPage();
 
-            // Setup User Agent
             const userAgent = new UserAgents({ 
                 deviceCategory: config.deviceType 
             }).toString();
@@ -94,14 +90,12 @@ class TrafficGenerator {
 
             this.log(sessionId, 'STEP_1_COMPLETE', `Browser launched dengan ${config.deviceType} user agent`);
 
-            // STEP 2: Buka Target URL
             this.log(sessionId, 'STEP_2', `Membuka URL target: ${config.targetUrl}`);
             await page.goto(config.targetUrl, { 
                 waitUntil: 'networkidle2',
                 timeout: 30000 
             });
             
-            // Cek kebocoran data
             const currentUrl = page.url();
             if (currentUrl.includes('google.com') && currentUrl.includes('url=')) {
                 this.log(sessionId, 'DATA_LEAK_CHECK', 'Peringatan: Kemungkinan kebocoran data terdeteksi');
@@ -109,37 +103,30 @@ class TrafficGenerator {
 
             this.log(sessionId, 'STEP_2_COMPLETE', 'Berhasil membuka URL target');
 
-            // STEP 3: Simulasi Scroll Manusia
             this.log(sessionId, 'STEP_3', 'Memulai simulasi scroll manusia...');
             await this.humanScroll(page);
             this.log(sessionId, 'STEP_3_COMPLETE', 'Simulasi scroll selesai');
 
-            // STEP 4: Klik Random Post
             this.log(sessionId, 'STEP_4', 'Mencari postingan untuk diklik...');
             await this.clickRandomLink(page);
             this.log(sessionId, 'STEP_4_COMPLETE', 'Berhasil klik postingan');
 
-            // STEP 5: Skip Google Ads jika ada
             this.log(sessionId, 'STEP_5', 'Memeriksa iklan Google...');
             await this.skipGoogleAds(page);
             this.log(sessionId, 'STEP_5_COMPLETE', 'Iklan dilewati');
 
-            // STEP 6: Lanjutkan Reading dengan Scroll
             this.log(sessionId, 'STEP_6', 'Melanjutkan membaca dengan scroll...');
             await this.humanScroll(page);
             this.log(sessionId, 'STEP_6_COMPLETE', 'Membaca selesai');
 
-            // STEP 7: Klik Menu Home
             this.log(sessionId, 'STEP_7', 'Kembali ke home...');
             await this.clickHome(page);
             this.log(sessionId, 'STEP_7_COMPLETE', 'Berhasil kembali ke home');
 
-            // STEP 8: Clear Cache
             this.log(sessionId, 'STEP_8', 'Membersihkan cache...');
             await this.clearCache(browser);
             this.log(sessionId, 'STEP_8_COMPLETE', 'Cache dibersihkan');
 
-            // Session Completed
             this.log(sessionId, 'SESSION_COMPLETED', 'Semua step berhasil diselesaikan');
             this.stopSession(sessionId);
 
@@ -166,7 +153,6 @@ class TrafficGenerator {
             '--lang=en-US,en;q=0.9',
         ];
 
-        // Add proxy jika tersedia
         if (config.proxyList && config.proxyList.length > 0) {
             const randomProxy = config.proxyList[Math.floor(Math.random() * config.proxyList.length)];
             args.push(`--proxy-server=${randomProxy}`);
@@ -174,7 +160,7 @@ class TrafficGenerator {
         }
 
         return await puppeteer.launch({
-            headless: true,
+            headless: "new",  // ✅ DIUBAH
             args: args,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null,
         });
@@ -184,11 +170,9 @@ class TrafficGenerator {
         const viewportHeight = page.viewport().height;
         let scrollHeight = 0;
         
-        // Get total scroll height
         const totalHeight = await page.evaluate(() => document.body.scrollHeight);
         
         while (scrollHeight < totalHeight) {
-            // Scroll random amount (100-300px)
             const scrollAmount = Math.floor(Math.random() * 200) + 100;
             scrollHeight += scrollAmount;
             
@@ -196,11 +180,9 @@ class TrafficGenerator {
                 window.scrollTo(0, scrollTo);
             }, scrollHeight);
             
-            // Random delay between scrolls (1-3 seconds)
             await page.waitForTimeout(Math.random() * 2000 + 1000);
         }
         
-        // Scroll back to top
         await page.evaluate(() => {
             window.scrollTo(0, 0);
         });
@@ -208,7 +190,6 @@ class TrafficGenerator {
 
     async clickRandomLink(page) {
         try {
-            // Cari semua link yang mungkin
             const links = await page.$$eval('a[href]', anchors => 
                 anchors
                     .filter(a => a.href && !a.href.includes('#') && a.href !== window.location.href)
@@ -230,7 +211,6 @@ class TrafficGenerator {
 
     async skipGoogleAds(page) {
         try {
-            // Coba skip berbagai jenis iklan Google
             const skipSelectors = [
                 'button[aria-label="Skip ad"]',
                 '.videoAdUiSkipButton',
@@ -257,7 +237,6 @@ class TrafficGenerator {
 
     async clickHome(page) {
         try {
-            // Coba berbagai selector untuk home button
             const homeSelectors = [
                 'a[href="/"]',
                 'a[href*="home"]',
@@ -298,7 +277,6 @@ class TrafficGenerator {
         }
     }
 
-    // Log management
     log(sessionId, step, message) {
         const timestamp = new Date().toLocaleString('id-ID');
         const logEntry = { timestamp, step, message };
