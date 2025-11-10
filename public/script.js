@@ -1,6 +1,7 @@
 // public/script.js - Frontend Logic Lengkap dengan Auto-loop
 document.addEventListener('DOMContentLoaded', function() {
     loadSystemStatus();
+    checkAutoLoopStatus(); // Check status saat load
     
     document.getElementById('botConfig').addEventListener('submit', async function(e) {
         e.preventDefault();
@@ -59,6 +60,17 @@ async function startAutoLoop() {
             targetUrl: document.getElementById('targetUrl').value || 'https://github.com'
         };
 
+        // Validasi input
+        if (!config.targetUrl) {
+            alert('❌ Please enter target URL');
+            return;
+        }
+
+        if (config.interval < 300000) { // 5 menit minimum
+            alert('❌ Interval minimum 5 menit');
+            return;
+        }
+
         const response = await fetch('/api/auto-loop/start', {
             method: 'POST',
             headers: {
@@ -71,11 +83,16 @@ async function startAutoLoop() {
         
         if (result.success) {
             document.getElementById('autoLoopStatus').innerHTML = 
-                `<div style="color: #27ae60;">
-                    ✅ ${result.message}<br>
+                `<div style="color: #27ae60; background: #d5f4e6; padding: 15px; border-radius: 8px; border-left: 4px solid #27ae60;">
+                    <strong>✅ ${result.message}</strong><br>
                     ⏰ Interval: ${config.interval/60000} menit<br>
-                    📊 Max Sessions: ${config.maxSessions}
+                    📊 Max Sessions: ${config.maxSessions}<br>
+                    🌐 Target: ${config.targetUrl}<br>
+                    <small>Auto-loop akan berjalan terus hingga di-stop manual</small>
                 </div>`;
+                
+            // Update status setiap 10 detik
+            setTimeout(checkAutoLoopStatus, 10000);
         } else {
             alert('❌ ' + result.error);
         }
@@ -85,6 +102,10 @@ async function startAutoLoop() {
 }
 
 async function stopAutoLoop() {
+    if (!confirm('Are you sure you want to stop AUTO-LOOP? Semua session akan berhenti.')) {
+        return;
+    }
+    
     try {
         const response = await fetch('/api/auto-loop/stop', {
             method: 'POST'
@@ -94,7 +115,10 @@ async function stopAutoLoop() {
         
         if (result.success) {
             document.getElementById('autoLoopStatus').innerHTML = 
-                `<div style="color: #e74c3c;">⏹️ ${result.message}</div>`;
+                `<div style="color: #e74c3c; background: #fadbd8; padding: 15px; border-radius: 8px; border-left: 4px solid #e74c3c;">
+                    ⏹️ <strong>${result.message}</strong><br>
+                    <small>Auto-loop telah dihentikan. Session manual masih bisa dijalankan.</small>
+                </div>`;
         } else {
             alert('❌ ' + result.error);
         }
@@ -110,32 +134,52 @@ async function checkAutoLoopStatus() {
 
         const statusDiv = document.getElementById('autoLoopStatus');
         if (result.success) {
+            const statusColor = result.config.enabled ? '#27ae60' : '#e74c3c';
+            const statusText = result.config.enabled ? '🟢 RUNNING' : '🔴 STOPPED';
+            const statusBg = result.config.enabled ? '#d5f4e6' : '#fadbd8';
+            
             statusDiv.innerHTML = `
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
-                    <strong>Auto-Loop Status:</strong><br>
-                    🔄 Status: ${result.config.enabled ? '🟢 RUNNING' : '🔴 STOPPED'}<br>
+                <div style="background: ${statusBg}; padding: 15px; border-radius: 8px; border-left: 4px solid ${statusColor};">
+                    <strong>Auto-Loop Status: ${statusText}</strong><br>
                     ⏰ Interval: ${result.config.interval/60000} menit<br>
                     📊 Max Sessions: ${result.config.maxSessions}<br>
-                    🎯 Active Sessions: ${result.activeSessions}/${result.config.maxSessions}<br>
-                    🌐 Target: ${result.config.targetUrl}
+                    🎯 Active Sessions: <strong>${result.activeSessions}/${result.config.maxSessions}</strong><br>
+                    🌐 Target: ${result.config.targetUrl}<br>
+                    <small>Last checked: ${new Date().toLocaleTimeString()}</small>
                 </div>
             `;
+            
+            // Auto-refresh status jika running
+            if (result.config.enabled) {
+                setTimeout(checkAutoLoopStatus, 10000);
+            }
         }
     } catch (error) {
-        alert('❌ Network error: ' + error.message);
+        document.getElementById('autoLoopStatus').innerHTML = 
+            `<div style="color: #e74c3c;">
+                ❌ Cannot connect to server
+            </div>`;
     }
 }
 
 async function testPuppeteer() {
     try {
+        const testBtn = document.querySelector('button[onclick="testPuppeteer()"]');
+        const originalText = testBtn.textContent;
+        testBtn.disabled = true;
+        testBtn.textContent = 'Testing...';
+        
         const response = await fetch('/api/test-puppeteer');
         const result = await response.json();
         
         if (result.success) {
-            alert('✅ Puppeteer test passed! System ready to use.');
+            alert('✅ Puppeteer test passed! System ready to use.\n\nChrome Path: ' + (result.chromePath || 'Default'));
         } else {
             alert('❌ Puppeteer test failed: ' + result.error);
         }
+        
+        testBtn.disabled = false;
+        testBtn.textContent = originalText;
     } catch (error) {
         alert('❌ Test error: ' + error.message);
     }
@@ -150,25 +194,28 @@ async function loadSystemStatus() {
         
         if (result.success) {
             statusDiv.innerHTML = `
-                <div style="color: #27ae60;">
+                <div style="color: #27ae60; background: #d5f4e6; padding: 15px; border-radius: 8px; border-left: 4px solid #27ae60;">
                     ✅ <strong>System Ready</strong><br>
                     📍 Chrome Path: ${result.chromePath || 'Default'}<br>
-                    💡 Message: ${result.message}
+                    💡 Message: ${result.message}<br>
+                    <small>Semua sistem berfungsi dengan baik</small>
                 </div>
             `;
         } else {
             statusDiv.innerHTML = `
-                <div style="color: #e74c3c;">
+                <div style="color: #e74c3c; background: #fadbd8; padding: 15px; border-radius: 8px; border-left: 4px solid #e74c3c;">
                     ❌ <strong>System Error</strong><br>
-                    📍 Error: ${result.error}
+                    📍 Error: ${result.error}<br>
+                    <small>Periksa konfigurasi Puppeteer</small>
                 </div>
             `;
         }
     } catch (error) {
         document.getElementById('systemStatus').innerHTML = `
-            <div style="color: #e74c3c;">
+            <div style="color: #e74c3c; background: #fadbd8; padding: 15px; border-radius: 8px; border-left: 4px solid #e74c3c;">
                 ❌ <strong>Connection Error</strong><br>
-                📍 Cannot connect to server
+                📍 Cannot connect to server<br>
+                <small>Pastikan server sedang berjalan</small>
             </div>
         `;
     }
@@ -186,14 +233,27 @@ function clearSessions() {
         .then(response => response.json())
         .then(result => {
             if (result.success) {
-                alert('All sessions cleared!');
+                alert('✅ All sessions cleared!');
                 loadSystemStatus();
+                checkAutoLoopStatus();
             } else {
-                alert('Error: ' + result.error);
+                alert('❌ Error: ' + result.error);
             }
         })
         .catch(error => {
-            alert('Network error: ' + error.message);
+            alert('❌ Network error: ' + error.message);
         });
     }
-                        }
+}
+
+// Utility function untuk format time
+function formatTime(ms) {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = ((ms % 60000) / 1000).toFixed(0);
+    return minutes + ":" + (seconds < 10 ? '0' : '') + seconds;
+}
+
+// Auto-check status setiap 30 detik
+setInterval(() => {
+    checkAutoLoopStatus();
+}, 30000);
