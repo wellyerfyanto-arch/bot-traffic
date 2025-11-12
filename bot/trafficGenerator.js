@@ -13,48 +13,6 @@ class TrafficGenerator {
     this.autoRestartEnabled = true;
   }
 
-  async testPuppeteer() {
-    let browser;
-    try {
-      console.log('Testing Puppeteer with Chrome path:', process.env.PUPPETEER_EXECUTABLE_PATH);
-      
-      browser = await puppeteer.launch({
-        headless: "new",
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu'
-        ],
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
-      });
-      
-      const page = await browser.newPage();
-      await page.goto('https://httpbin.org/ip', { 
-        waitUntil: 'networkidle2',
-        timeout: 15000 
-      });
-      
-      const content = await page.content();
-      
-      return { 
-        success: true, 
-        message: 'Puppeteer is working correctly',
-        chromePath: process.env.PUPPETEER_EXECUTABLE_PATH 
-      };
-    } catch (error) {
-      console.error('Puppeteer test error:', error);
-      throw new Error(`Puppeteer test failed: ${error.message}`);
-    } finally {
-      if (browser) {
-        await browser.close().catch(e => console.error('Error closing browser:', e));
-      }
-    }
-  }
-
   async startNewSession(config) {
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
@@ -93,57 +51,37 @@ class TrafficGenerator {
       (config.isAutoLoop ? ' [AUTO-LOOP]' : '')
     );
     
-    // Execute session with auto-restart capability
-    this.executeSessionWithAutoRestart(sessionId, config);
+    // Execute session dengan error handling yang lebih baik
+    this.executeSessionWithRetry(sessionId, config).catch(error => {
+      this.log(sessionId, 'SESSION_ERROR', `Session failed: ${error.message}`);
+      this.stopSession(sessionId);
+    });
 
     return sessionId;
   }
 
-  async executeSessionWithAutoRestart(sessionId, config) {
-    const session = this.activeSessions.get(sessionId);
+  async executeSessionWithRetry(sessionId, config, retryCount = 0) {
+    const maxRetries = 2;
     
     try {
       await this.executeSession(sessionId, config);
-      
-      // Session completed successfully
-      this.log(sessionId, 'SESSION_COMPLETED', 'All steps completed successfully');
-      
-      // Auto-restart if enabled and it's an auto-loop session
-      if (this.autoRestartEnabled && session.isAutoLoop && session.restartCount < session.maxRestarts) {
-        session.restartCount++;
-        this.log(sessionId, 'AUTO_RESTART', 
-          `Restarting session (${session.restartCount}/${session.maxRestarts}) after 30 seconds...`);
-        
-        // Wait before restarting
-        setTimeout(() => {
-          if (this.activeSessions.has(sessionId) && this.activeSessions.get(sessionId).status === 'running') {
-            this.log(sessionId, 'RESTARTING', 'Starting new iteration...');
-            this.executeSessionWithAutoRestart(sessionId, config);
-          }
-        }, 30000); // 30 second delay between restarts
-        
-      } else {
-        this.stopSession(sessionId);
-      }
-      
     } catch (error) {
-      this.log(sessionId, 'SESSION_FAILED', `Session failed: ${error.message}`);
+      // Cek jika error terkait timeout atau network
+      const isNetworkError = error.message.includes('timeout') || 
+                            error.message.includes('TIMED_OUT') ||
+                            error.message.includes('NETWORK') ||
+                            error.message.includes('ERR_');
       
-      // Auto-restart on failure for auto-loop sessions
-      if (this.autoRestartEnabled && session.isAutoLoop && session.restartCount < session.maxRestarts) {
-        session.restartCount++;
-        this.log(sessionId, 'AUTO_RESTART_ON_ERROR', 
-          `Restarting after error (${session.restartCount}/${session.maxRestarts}) in 60 seconds...`);
+      if (retryCount < maxRetries && isNetworkError) {
+        const delay = Math.pow(2, retryCount) * 10000; // Exponential backoff: 10s, 20s
+        this.log(sessionId, 'RETRY_ATTEMPT', 
+          `Network error, retrying in ${delay/1000}s... (${retryCount + 1}/${maxRetries})`);
         
-        // Longer delay on error
-        setTimeout(() => {
-          if (this.activeSessions.has(sessionId) && this.activeSessions.get(sessionId).status === 'running') {
-            this.log(sessionId, 'RESTARTING_AFTER_ERROR', 'Starting new iteration after error...');
-            this.executeSessionWithAutoRestart(sessionId, config);
-          }
-        }, 60000); // 60 second delay on error
-        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        await this.executeSessionWithRetry(sessionId, config, retryCount + 1);
       } else {
+        this.log(sessionId, 'SESSION_FAILED', 
+          `Session failed after ${retryCount + 1} attempts: ${error.message}`);
         this.stopSession(sessionId);
       }
     }
@@ -152,17 +90,17 @@ class TrafficGenerator {
   async executeSession(sessionId, config) {
     let browser;
     try {
-      // STEP 1: Launch Browser
+      // STEP 1: Launch Browser dengan timeout yang lebih panjang
       this.log(sessionId, 'STEP_1', 'Launching browser...');
-      browser = await this.launchBrowserWithTimeout(config, 45000); // 45 second timeout
+      browser = await this.launchBrowserWithTimeout(config, 60000); // 60 detik timeout
       
       const page = await browser.newPage();
       
-      // Configure page timeouts
-      page.setDefaultTimeout(30000);
-      page.setDefaultNavigationTimeout(30000);
+      // Configure page timeouts - lebih panjang untuk halaman berat
+      page.setDefaultTimeout(45000);
+      page.setDefaultNavigationTimeout(60000);
 
-      // Setup User Agent and device simulation
+      // Setup User Agent dan viewport
       const userAgent = new UserAgents({ 
         deviceCategory: config.deviceType 
       }).toString();
@@ -173,32 +111,46 @@ class TrafficGenerator {
         height: config.deviceType === 'mobile' ? 667 : 720 
       });
 
+      // Block resources yang tidak penting untuk mempercepat loading
+      await page.setRequestInterception(true);
+      page.on('request', (req) => {
+        const resourceType = req.resourceType();
+        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+
       this.log(sessionId, 'STEP_1_COMPLETE', `Browser launched with ${config.deviceType} user agent`);
 
-      // STEP 2: Navigate to Target
+      // STEP 2: Navigate to Target dengan retry mechanism
       this.log(sessionId, 'STEP_2', `Navigating to: ${config.targetUrl}`);
       
-      const response = await page.goto(config.targetUrl, { 
-        waitUntil: 'networkidle2',
-        timeout: 60000
-      });
-      
-      if (!response || !response.ok()) {
-        this.log(sessionId, 'NAVIGATION_WARNING', `Navigation completed but with status: ${response?.status()}`);
+      try {
+        const response = await page.goto(config.targetUrl, { 
+          waitUntil: 'domcontentloaded', // Lebih cepat daripada 'networkidle2'
+          timeout: 60000
+        });
+        
+        if (!response) {
+          this.log(sessionId, 'NAVIGATION_WARNING', 'Navigation completed but no response object');
+        } else if (!response.ok() && response.status() !== 304) {
+          this.log(sessionId, 'NAVIGATION_WARNING', 
+            `Navigation completed with status: ${response.status()} ${response.statusText()}`);
+        }
+
+        this.log(sessionId, 'STEP_2_COMPLETE', 'Successfully navigated to target URL');
+
+        // STEP 3-8: Execute steps dengan error handling individual
+        await this.executeAllSteps(page, sessionId);
+
+        this.log(sessionId, 'SESSION_COMPLETED', 'All steps completed successfully');
+
+      } catch (navError) {
+        this.log(sessionId, 'NAVIGATION_ERROR', `Navigation failed: ${navError.message}`);
+        throw navError;
       }
-      
-      // Check for data leaks
-      const currentUrl = page.url();
-      if (currentUrl.includes('google.com') && currentUrl.includes('url=')) {
-        this.log(sessionId, 'DATA_LEAK_CHECK', 'Warning: Possible data leak detected');
-      }
-
-      this.log(sessionId, 'STEP_2_COMPLETE', 'Successfully navigated to target URL');
-
-      // Execute all steps with individual error handling
-      await this.executeAllSteps(page, sessionId);
-
-      this.log(sessionId, 'SESSION_COMPLETED', 'All steps completed successfully');
 
     } catch (error) {
       this.log(sessionId, 'EXECUTION_ERROR', `Error during session execution: ${error.message}`);
@@ -223,15 +175,20 @@ class TrafficGenerator {
           this.log(sessionId, 'STEP_3', 'Starting human-like scroll simulation...');
           await this.humanScroll(page);
         },
-        successMessage: 'Scroll simulation completed'
+        successMessage: 'Scroll simulation completed',
+        timeout: 30000
       },
       {
         name: 'STEP_4', 
         action: async () => {
           this.log(sessionId, 'STEP_4', 'Looking for random post to click...');
-          await this.clickRandomLink(page);
+          const clicked = await this.clickRandomLink(page);
+          if (!clicked) {
+            this.log(sessionId, 'STEP_4_SKIP', 'No suitable links found, skipping click step');
+          }
         },
-        successMessage: 'Random click completed'
+        successMessage: 'Random click completed',
+        timeout: 15000
       },
       {
         name: 'STEP_5',
@@ -239,7 +196,8 @@ class TrafficGenerator {
           this.log(sessionId, 'STEP_5', 'Checking for Google ads...');
           await this.skipGoogleAds(page);
         },
-        successMessage: 'Ads handled'
+        successMessage: 'Ads handled',
+        timeout: 10000
       },
       {
         name: 'STEP_6',
@@ -247,7 +205,8 @@ class TrafficGenerator {
           this.log(sessionId, 'STEP_6', 'Continuing reading with scroll...');
           await this.humanScroll(page);
         },
-        successMessage: 'Continued reading completed'
+        successMessage: 'Continued reading completed',
+        timeout: 30000
       },
       {
         name: 'STEP_7',
@@ -255,7 +214,8 @@ class TrafficGenerator {
           this.log(sessionId, 'STEP_7', 'Returning to home...');
           await this.clickHome(page);
         },
-        successMessage: 'Returned to home'
+        successMessage: 'Returned to home',
+        timeout: 15000
       },
       {
         name: 'STEP_8',
@@ -263,21 +223,30 @@ class TrafficGenerator {
           this.log(sessionId, 'STEP_8', 'Clearing cache...');
           await this.clearCache(page);
         },
-        successMessage: 'Cache cleared'
+        successMessage: 'Cache cleared',
+        timeout: 5000
       }
     ];
 
     for (const step of steps) {
       try {
-        await step.action();
+        // Set timeout untuk step individual
+        await Promise.race([
+          step.action(),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Step ${step.name} timeout`)), step.timeout)
+          )
+        ]);
+        
         this.log(sessionId, `${step.name}_COMPLETE`, step.successMessage);
         
-        // Random delay between steps (2-5 seconds)
+        // Random delay antara steps (2-5 detik)
         await page.waitForTimeout(Math.random() * 3000 + 2000);
         
       } catch (stepError) {
-        this.log(sessionId, `${step.name}_ERROR`, `Step failed but continuing: ${stepError.message}`);
-        // Continue with next step even if this one fails
+        this.log(sessionId, `${step.name}_ERROR`, 
+          `Step failed but continuing: ${stepError.message}`);
+        // Continue dengan next step meski ada error
       }
     }
   }
@@ -309,9 +278,13 @@ class TrafficGenerator {
       '--no-zygote',
       '--disable-gpu',
       '--lang=en-US,en;q=0.9',
+      '--disable-features=VizDisplayCompositor',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding'
     ];
 
-    // Add proxy if available and valid
+    // Add proxy jika tersedia dan valid
     if (config.proxyList && config.proxyList.length > 0) {
       const randomProxy = this.proxyHandler.getRandomProxy();
       if (randomProxy) {
@@ -337,30 +310,38 @@ class TrafficGenerator {
   }
 
   async humanScroll(page) {
-    const viewportHeight = page.viewport().height;
-    let scrollHeight = 0;
-    
-    const totalHeight = await page.evaluate(() => document.body.scrollHeight);
-    const scrollableHeight = totalHeight - viewportHeight;
-    
-    while (scrollHeight < scrollableHeight) {
-      const scrollAmount = Math.floor(Math.random() * 200) + 100;
-      scrollHeight = Math.min(scrollHeight + scrollAmount, scrollableHeight);
+    try {
+      const viewportHeight = page.viewport().height;
+      let scrollHeight = 0;
       
-      await page.evaluate((scrollTo) => {
-        window.scrollTo(0, scrollTo);
-      }, scrollHeight);
+      const totalHeight = await page.evaluate(() => document.body.scrollHeight);
+      const scrollableHeight = totalHeight - viewportHeight;
       
-      // Random delay between scrolls (1-3 seconds)
-      await page.waitForTimeout(Math.random() * 2000 + 1000);
+      // Scroll hanya 80% dari total height untuk menghindari footer
+      const targetScrollHeight = scrollableHeight * 0.8;
+      
+      while (scrollHeight < targetScrollHeight) {
+        const scrollAmount = Math.floor(Math.random() * 200) + 100;
+        scrollHeight = Math.min(scrollHeight + scrollAmount, targetScrollHeight);
+        
+        await page.evaluate((scrollTo) => {
+          window.scrollTo(0, scrollTo);
+        }, scrollHeight);
+        
+        // Random delay antara scrolls (1-3 detik)
+        await page.waitForTimeout(Math.random() * 2000 + 1000);
+      }
+      
+      // Scroll back to top
+      await page.evaluate(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      
+      await page.waitForTimeout(1000);
+    } catch (error) {
+      console.log('Scroll error:', error.message);
+      // Continue meski scroll error
     }
-    
-    // Scroll back to top
-    await page.evaluate(() => {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-    
-    await page.waitForTimeout(1000);
   }
 
   async clickRandomLink(page) {
@@ -373,6 +354,8 @@ class TrafficGenerator {
             return href && 
                    !href.includes('#') && 
                    !href.startsWith('javascript:') &&
+                   !href.includes('mailto:') &&
+                   !href.includes('tel:') &&
                    href !== window.location.href &&
                    text.length > 0 &&
                    a.offsetWidth > 0 && // Visible
@@ -387,11 +370,42 @@ class TrafficGenerator {
       if (links.length > 0) {
         const randomLink = links[Math.floor(Math.random() * links.length)];
         
-        // Use different method to click to avoid detection
+        // Gunakan approach yang berbeda untuk menghindari detection
         await page.evaluate((href) => {
           const link = document.querySelector(`a[href="${href}"]`);
           if (link) {
-            link.click();
+            const rect = link.getBoundingClientRect();
+            const x = rect.left + rect.width / 2;
+            const y = rect.top + rect.height / 2;
+            
+            // Simulate mouse movement dan click
+            const mouseDown = new MouseEvent('mousedown', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: x,
+              clientY: y
+            });
+            
+            const mouseUp = new MouseEvent('mouseup', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: x,
+              clientY: y
+            });
+            
+            const click = new MouseEvent('click', {
+              view: window,
+              bubbles: true,
+              cancelable: true,
+              clientX: x,
+              clientY: y
+            });
+            
+            link.dispatchEvent(mouseDown);
+            link.dispatchEvent(mouseUp);
+            link.dispatchEvent(click);
           }
         }, randomLink.href);
         
@@ -414,7 +428,8 @@ class TrafficGenerator {
         '.ytp-ad-skip-button',
         'div.skip-ad-button',
         'button[class*="skip"]',
-        '.ad-skip-button'
+        '.ad-skip-button',
+        '[data-adskip]'
       ];
       
       for (const selector of skipSelectors) {
@@ -444,7 +459,9 @@ class TrafficGenerator {
         '.navbar-brand',
         'header a',
         'a.logo',
-        '[data-testid="home-link"]'
+        '[data-testid="home-link"]',
+        '.navbar-home',
+        '[title="Home"]'
       ];
       
       for (const selector of homeSelectors) {
@@ -461,9 +478,11 @@ class TrafficGenerator {
       }
       
       // Fallback: go to root URL
-      await page.goto(new URL('/', page.url()).href, { 
-        waitUntil: 'networkidle2',
-        timeout: 20000 
+      const currentUrl = page.url();
+      const baseUrl = new URL(currentUrl).origin;
+      await page.goto(baseUrl, { 
+        waitUntil: 'domcontentloaded',
+        timeout: 10000 
       });
       return true;
       
@@ -537,7 +556,7 @@ class TrafficGenerator {
   stopSession(sessionId) {
     if (this.activeSessions.has(sessionId)) {
       this.activeSessions.get(sessionId).status = 'stopped';
-      this.log(sessionId, 'SESSION_STOPPED', 'Session stopped by user');
+      this.log(sessionId, 'SESSION_STOPPED', 'Session stopped');
     }
   }
 
