@@ -98,7 +98,10 @@ app.get('/monitoring', (req, res) => {
 // API Routes - SESSION MANAGEMENT
 app.post('/api/start-session', async (req, res) => {
   try {
-    console.log('Starting new session with config:', req.body);
+    console.log('Starting new session with config:', {
+      ...req.body,
+      proxies: req.body.proxies ? '***' + req.body.proxies.split('\n').length + ' proxies***' : 'none'
+    });
     
     const { profiles, proxies, targetUrl, deviceType, autoLoop } = req.body;
     
@@ -121,14 +124,14 @@ app.post('/api/start-session', async (req, res) => {
       maxRestarts: autoLoop ? 5 : 0
     };
 
-    console.log('Session config:', sessionConfig);
+    console.log('Session config with Google ads feature enabled');
 
     const sessionId = await botManager.startNewSession(sessionConfig);
     
     res.json({ 
       success: true, 
       sessionId,
-      message: 'Session started successfully'
+      message: 'Session started with Google ads feature'
     });
   } catch (error) {
     console.error('Error starting session:', error);
@@ -251,8 +254,21 @@ app.get('/api/auto-loop/status', (req, res) => {
 // API Routes - SYSTEM MANAGEMENT
 app.get('/api/test-puppeteer', async (req, res) => {
   try {
-    const result = await botManager.testPuppeteer();
-    res.json(result);
+    const puppeteer = require('puppeteer');
+    const browser = await puppeteer.launch({ 
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.goto('https://example.com');
+    const title = await page.title();
+    await browser.close();
+    
+    res.json({ 
+      success: true, 
+      message: 'Puppeteer test successful',
+      title: title
+    });
   } catch (error) {
     console.error('Puppeteer test failed:', error);
     res.status(500).json({ 
@@ -327,6 +343,7 @@ app.listen(PORT, () => {
   console.log(`⏰ Auto-loop interval: ${AUTO_LOOP_CONFIG.interval/60000} minutes`);
   console.log(`📈 Max sessions: ${AUTO_LOOP_CONFIG.maxSessions}`);
   console.log(`🎯 Target URL: ${AUTO_LOOP_CONFIG.targetUrl}`);
+  console.log(`🆕 Google Ads Feature: ENABLED`);
 });
 
 // Handle graceful shutdown
